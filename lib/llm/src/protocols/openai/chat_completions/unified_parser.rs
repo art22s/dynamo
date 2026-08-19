@@ -282,15 +282,14 @@ impl ChoiceState {
         // the rendered prompt text (see `stream_prefill` / `detect_prefill`), not from
         // token IDs, which the preprocessor has already consumed by this point.
         //
-        // `Reject` rather than `RecoverAsText`: a guided-decoding contract violation is a
-        // backend bug, and surfacing the bytes as content would silently serve a malformed
-        // tool call as prose. The error lands on `give_up`, which already replays the
-        // buffered bytes as text and logs — so nothing is dropped, but it is not silent.
+        // Streaming guided calls commit per call once the name and argument object opener
+        // are unambiguous. A committed fragment cannot later be rejected or recovered as
+        // text, so this path opts into that contract explicitly.
         parser.initialize_request(UnifiedParserInit {
             prompt_token_ids: Vec::new(),
             starting_state: prefill,
             tool_output_mode,
-            invalid_guided_payload: InvalidGuidedPayloadPolicy::Reject,
+            invalid_guided_payload: InvalidGuidedPayloadPolicy::StreamBestEffort,
         })?;
         Ok(Self {
             family,
@@ -1218,10 +1217,63 @@ mod tests {
         .await;
 
         let choices = collect_choices(&responses);
-        let call = &choices[1].delta.tool_calls.as_ref().unwrap()[0];
-        let function = call.function.as_ref().unwrap();
-        assert_eq!(function.name.as_deref(), Some("get_weather"));
-        assert_eq!(function.arguments.as_deref(), Some(r#"{"city":"Tokyo"}"#));
+        let calls: Vec<_> = choices
+            .iter()
+            .filter_map(|choice| choice.delta.tool_calls.as_ref())
+            .flatten()
+            .collect();
+        assert_eq!(
+            calls
+                .iter()
+                .find_map(|call| call.function.as_ref()?.name.as_deref()),
+            Some("get_weather")
+        );
+        let arguments: String = calls
+            .iter()
+            .filter_map(|call| call.function.as_ref()?.arguments.as_deref())
+            .collect();
+        assert_eq!(arguments, r#"{"city":"Tokyo"}"#);
+    }
+
+    #[tokio::test]
+    async fn required_guided_emits_name_before_polling_call_completion() {
+        let prefix = r#"reason</think>[{"name":"get_weather","arguments":{"#;
+        let upstream = stream::iter([chunk(prefix, false)]).chain(stream::poll_fn(|_| {
+            panic!("apply_stream polled for call-completing bytes before emitting the tool name")
+        }));
+        let responses = apply_stream(
+            upstream,
+            Some(weather_tools()),
+            Some(ChatCompletionToolChoiceOption::Required),
+            false,
+            UnifiedParserStartingState::Reasoning,
+            QWEN3_UNIFIED_FAMILY,
+        );
+        tokio::pin!(responses);
+
+        let reasoning = responses.next().await.expect("reasoning delta");
+        assert_eq!(
+            collect_choices(&[reasoning])[0]
+                .delta
+                .reasoning_content
+                .as_deref(),
+            Some("reason")
+        );
+
+        let tool = responses.next().await.expect("tool-name delta");
+        let tool_responses = [tool];
+        let tool_choices = collect_choices(&tool_responses);
+        let call = &tool_choices[0]
+            .delta
+            .tool_calls
+            .as_ref()
+            .expect("tool call before completion")[0];
+        assert_eq!(
+            call.function
+                .as_ref()
+                .and_then(|function| function.name.as_deref()),
+            Some("get_weather")
+        );
     }
 
     #[tokio::test]
