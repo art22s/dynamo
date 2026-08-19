@@ -727,8 +727,7 @@ generate-api-docs: crd-ref-docs ## Generate API reference documentation from CRD
 	cat docs/header.md ./docs/api_reference.md docs/footer.md > ../../docs/fern/pages/reference/kubernetes-api/additional-resources/api-reference-k8s.md
 	rm ./docs/api_reference.md
 	@echo "✅ Concatenated header.md, api_reference.md, and footer.md"
-	# Fix duplicate anchors: crd-ref-docs generates identical anchors for same-named types
-	# across API versions; prepend "v1beta1 " to affected v1beta1 headings and links.
+	# Post-process duplicate anchors and fields pruned from standalone DCD CRDs.
 	python3 docs/fix-api-anchors.py ../../docs/fern/pages/reference/kubernetes-api/additional-resources/api-reference-k8s.md
 
 HELM_CHART_DIR := ../helm/charts/platform

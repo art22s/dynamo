@@ -515,7 +515,7 @@ See [DynamoComponentDeploymentSpec](#dynamocomponentdeploymentspec).
 <Accordion id="dynamocomponentdeploymentsharedspec" title="DynamoComponentDeploymentSharedSpec">
 
 **Kind:** `type`
-**Appears in:** [DynamoComponentDeploymentSpec](#dynamocomponentdeploymentspec), [DynamoGraphDeploymentSpec](#dynamographdeploymentspec)
+**Appears in:** [DynamoGraphDeploymentSpec](#dynamographdeploymentspec)
 
 <ParamField path="providerOverride" type="ProviderOverride">
 ProviderOverride configures the primary Grove unit representing this DGD component. With apiVersion `grove.io/v1alpha1`, target is `PodCliqueTemplateSpec` for a single-node component or `PodCliqueScalingGroupConfig` for a PCSG-backed component; value may set only `topologyConstraint`. Standalone DCD OpenAPI omits this field.
@@ -684,12 +684,6 @@ BackendFramework specifies the backend framework (e.g., "sglang", "vllm", "trtll
 **Validation:** Enum: [sglang vllm trtllm]
 </ParamField>
 
-<ParamField path="providerOverride" type="ProviderOverride">
-ProviderOverride configures the primary Grove unit representing this DGD component. With apiVersion `grove.io/v1alpha1`, target is `PodCliqueTemplateSpec` for a single-node component or `PodCliqueScalingGroupConfig` for a PCSG-backed component; value may set only `topologyConstraint`. Standalone DCD OpenAPI omits this field.
-See [ProviderOverride](#provideroverride).
-**Validation:** Optional: \&#123;\&#125;
-</ParamField>
-
 <ParamField path="annotations" type="object (keys:string, values:string)">
 Annotations to add to generated Kubernetes resources for this component (such as Pod, Service, and Ingress when applicable).
 </ParamField>
@@ -791,9 +785,8 @@ MinAvailable maps to Grove PodClique minAvailable for single-node and Grove PodC
 **Validation:** Minimum: 1  Optional: \&#123;\&#125;
 </ParamField>
 
-<ParamField path="multinode" type="MultinodeSpec">
-Multinode is the configuration for multinode components.
-See [MultinodeSpec](#multinodespec).
+<ParamField path="multinode" type="object">
+Multinode is the configuration for multinode components. Standalone DCDs accept only `nodeCount`; `leader` and `worker` are DGD-only provider contexts.
 </ParamField>
 
 <ParamField path="scalingAdapter" type="ScalingAdapter">
@@ -1688,7 +1681,7 @@ See [ProviderOverride](#provideroverride).
 <Accordion id="multinodespec" title="MultinodeSpec">
 
 **Kind:** `type`
-**Appears in:** [DynamoComponentDeploymentSharedSpec](#dynamocomponentdeploymentsharedspec), [DynamoComponentDeploymentSpec](#dynamocomponentdeploymentspec)
+**Appears in:** [DynamoComponentDeploymentSharedSpec](#dynamocomponentdeploymentsharedspec)
 
 <ParamField path="nodeCount" type="integer" default="2">
 Indicates the number of nodes to deploy for multinode components. Total number of GPUs is NumberOfNodes * GPU limit. Must be greater than 1.
@@ -2054,7 +2047,7 @@ All other providers, versions, targets, and fields are rejected.
 
 
 **Kind:** `type`
-**Appears in:** [DynamoComponentDeploymentSharedSpec](#dynamocomponentdeploymentsharedspec), [DynamoComponentDeploymentSpec](#dynamocomponentdeploymentspec), [DynamoGraphDeploymentSpec](#dynamographdeploymentspec), [MultinodeRoleSpec](#multinoderolespec)
+**Appears in:** [DynamoComponentDeploymentSharedSpec](#dynamocomponentdeploymentsharedspec), [DynamoGraphDeploymentSpec](#dynamographdeploymentspec), [MultinodeRoleSpec](#multinoderolespec)
 
 <ParamField path="apiVersion" type="string" required={true}>
 apiVersion is the Kubernetes API group and version of the provider schema. Grove requires `grove.io/v1alpha1`.
@@ -2950,7 +2943,7 @@ directly in `podTemplate` without any `extraPodSpec`-style escape hatch.
 
 
 **Kind:** `type`
-**Appears in:** [DynamoComponentDeploymentSpec](#v1beta1-dynamocomponentdeploymentspec), [DynamoGraphDeploymentSpec](#v1beta1-dynamographdeploymentspec)
+**Appears in:** [DynamoGraphDeploymentSpec](#v1beta1-dynamographdeploymentspec)
 
 <ParamField path="providerOverride" type="ProviderOverride">
 providerOverride configures the primary Grove unit representing this DGD component. With apiVersion `grove.io/v1alpha1`, target is `PodCliqueTemplateSpec` for a single-node component or `PodCliqueScalingGroupConfig` for a PCSG-backed component; value may set only `topologyConstraint`. Standalone DCD OpenAPI omits this field.
@@ -3061,12 +3054,6 @@ backendFramework specifies the backend framework.
 **Validation:** Enum: [sglang vllm trtllm]
 </ParamField>
 
-<ParamField path="providerOverride" type="ProviderOverride">
-providerOverride configures the primary Grove unit representing this DGD component. With apiVersion `grove.io/v1alpha1`, target is `PodCliqueTemplateSpec` for a single-node component or `PodCliqueScalingGroupConfig` for a PCSG-backed component; value may set only `topologyConstraint`. Standalone DCD OpenAPI omits this field.
-See [ProviderOverride](#v1beta1-provideroverride).
-**Validation:** Optional: \&#123;\&#125;
-</ParamField>
-
 <ParamField path="name" type="string" required={true}>
 name is the stable logical identifier for this component within its DynamoGraphDeployment. It must be unique within the parent's `spec.components` list. For standalone DynamoComponentDeployment objects, the defaulting webhook populates `name` from `metadata.name` on admission, so users typically do not need to set it explicitly. `name` is decoupled from the underlying Kubernetes resource name so that the operator can rename child workloads (e.g. suffixing worker DCDs with a hash during rolling updates) without losing the stable identity that downstream consumers (labels, status maps, DGDSA references, planner RBAC, EPP filters) depend on.
 **Validation:** MaxLength: 63  MinLength: 1  Pattern: `^[A-Za-z0-9]([-A-Za-z0-9]*[A-Za-z0-9])?$`  Required: \&#123;\&#125;
@@ -3104,9 +3091,8 @@ minAvailable maps to Grove PodCliqueScalingGroup minAvailable for components ren
 **Validation:** Minimum: 1  Optional: \&#123;\&#125;
 </ParamField>
 
-<ParamField path="multinode" type="MultinodeSpec">
-multinode configures multinode components.
-See [MultinodeSpec](#v1beta1-multinodespec).
+<ParamField path="multinode" type="object">
+multinode configures multinode components. Standalone DCDs accept only `nodeCount`; `leader` and `worker` are DGD-only provider contexts.
 **Validation:** Optional: \&#123;\&#125;
 </ParamField>
 
@@ -3987,7 +3973,7 @@ MultinodeSpec configures a multinode component.
 
 
 **Kind:** `type`
-**Appears in:** [DynamoComponentDeploymentSharedSpec](#v1beta1-dynamocomponentdeploymentsharedspec), [DynamoComponentDeploymentSpec](#v1beta1-dynamocomponentdeploymentspec)
+**Appears in:** [DynamoComponentDeploymentSharedSpec](#v1beta1-dynamocomponentdeploymentsharedspec)
 
 <ParamField path="nodeCount" type="integer" default="2">
 nodeCount is the number of nodes to deploy for the multinode component. Total GPUs used is `nodeCount * container GPU request`.
@@ -4165,7 +4151,7 @@ All other providers, versions, targets, and fields are rejected.
 
 
 **Kind:** `type`
-**Appears in:** [DynamoComponentDeploymentSharedSpec](#v1beta1-dynamocomponentdeploymentsharedspec), [DynamoComponentDeploymentSpec](#v1beta1-dynamocomponentdeploymentspec), [DynamoGraphDeploymentSpec](#v1beta1-dynamographdeploymentspec), [MultinodeRoleSpec](#v1beta1-multinoderolespec)
+**Appears in:** [DynamoComponentDeploymentSharedSpec](#v1beta1-dynamocomponentdeploymentsharedspec), [DynamoGraphDeploymentSpec](#v1beta1-dynamographdeploymentspec), [MultinodeRoleSpec](#v1beta1-multinoderolespec)
 
 <ParamField path="apiVersion" type="string" required={true}>
 apiVersion is the Kubernetes API group and version of the provider schema. Grove requires `grove.io/v1alpha1`.

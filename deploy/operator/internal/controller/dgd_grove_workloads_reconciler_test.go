@@ -132,10 +132,20 @@ func TestGroveProviderOverridesUseOrdinaryPCSReconciliation(t *testing.T) {
 		},
 	}
 	rejectUpdate := false
+	updateCalls := 0
+	typedObservationCalls := 0
 	kubeClient := fake.NewClientBuilder().
 		WithScheme(newDynamoGraphDeploymentControllerTestScheme(t)).
 		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, reader client.WithWatch, key client.ObjectKey, object client.Object, opts ...client.GetOption) error {
+				if _, ok := object.(*grovev1alpha1.PodCliqueSet); ok {
+					typedObservationCalls++
+				}
+				return reader.Get(ctx, key, object, opts...)
+			},
 			Update: func(ctx context.Context, writer client.WithWatch, object client.Object, opts ...client.UpdateOption) error {
+				require.IsType(t, &unstructured.Unstructured{}, object, "opaque PCS updates must serialize only at the write boundary")
+				updateCalls++
 				if rejectUpdate {
 					return errors.New("provider rejected update")
 				}
@@ -148,12 +158,19 @@ func TestGroveProviderOverridesUseOrdinaryPCSReconciliation(t *testing.T) {
 	}
 
 	t.Log("Create the PCS after composing an opaque root topology override")
-	dgd.Spec.ProviderOverride = rootTopologyOverride(`{"topologyName":"gpu-topology"}`)
+	dgd.Spec.ProviderOverride = rootTopologyOverride(`{"topologyName":"gpu-topology","futureProviderField":{"enabled":true}}`)
 	providerObject, err := provideroverride.ComposeGroveOverrides(dgd, desired)
 	require.NoError(t, err)
 	_, err = reconciler.reconcilePodCliqueSet(context.Background(), dgd, providerObject)
 	require.NoError(t, err)
+	assert.Equal(t, 1, typedObservationCalls)
 	assertLiveRootTopologyValue(t, kubeClient, "topologyName", "gpu-topology")
+
+	t.Log("Observe the unchanged PCS through its typed cache representation without issuing an update")
+	_, err = reconciler.reconcilePodCliqueSet(context.Background(), dgd, providerObject)
+	require.NoError(t, err)
+	assert.Equal(t, 2, typedObservationCalls)
+	assert.Zero(t, updateCalls)
 
 	t.Log("Reject an ordinary PCS update and verify the live resource remains unchanged")
 	dgd.Spec.ProviderOverride = rootTopologyOverride(`{"topologyName":"changed"}`)
@@ -162,6 +179,7 @@ func TestGroveProviderOverridesUseOrdinaryPCSReconciliation(t *testing.T) {
 	rejectUpdate = true
 	_, err = reconciler.reconcilePodCliqueSet(context.Background(), dgd, providerObject)
 	require.ErrorContains(t, err, "provider rejected update")
+	assert.Equal(t, 1, updateCalls)
 	assertLiveRootTopologyValue(t, kubeClient, "topologyName", "gpu-topology")
 
 	t.Log("Remove the override and let the same PCS update path prune its subtree")
@@ -171,6 +189,7 @@ func TestGroveProviderOverridesUseOrdinaryPCSReconciliation(t *testing.T) {
 	require.NoError(t, err)
 	_, err = reconciler.reconcilePodCliqueSet(context.Background(), dgd, providerObject)
 	require.NoError(t, err)
+	assert.Equal(t, 2, updateCalls)
 	live := &unstructured.Unstructured{}
 	live.SetAPIVersion(provideroverride.GroveAPIVersion)
 	live.SetKind(provideroverride.TargetPodCliqueSet)

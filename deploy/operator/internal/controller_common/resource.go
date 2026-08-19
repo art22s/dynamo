@@ -78,29 +78,20 @@ func SyncResource[T client.Object](ctx context.Context, r Reconciler, parentReso
 		return
 	}
 
-	// Allocate the live object in the same representation as the desired resource.
-	var oldResource T
+	// Keep observation typed so controller-runtime serves registered resources from its informer cache.
 	if _, isUnstructured := any(resource).(*unstructured.Unstructured); isUnstructured {
 		resourceType = gvk.Kind
-		var ok bool
-		oldResource, ok = any(&unstructured.Unstructured{}).(T)
-		if !ok {
-			err = fmt.Errorf("unstructured resource does not implement the requested object type")
-			return
-		}
-		oldResource.GetObjectKind().SetGroupVersionKind(gvk)
-	} else {
-		obj, newErr := r.Scheme().New(gvk)
-		if newErr != nil {
-			err = newErr
-			logs.Error(err, "Failed to create a new object for GVK")
-			return
-		}
-		var ok bool
-		oldResource, ok = obj.(T)
-		if !ok {
-			return
-		}
+	}
+	obj, newErr := r.Scheme().New(gvk)
+	if newErr != nil {
+		err = newErr
+		logs.Error(err, "Failed to create a new object for GVK")
+		return
+	}
+	oldResource, ok := obj.(client.Object)
+	if !ok {
+		err = fmt.Errorf("resource registered for %s does not implement client.Object", gvk)
+		return
 	}
 	logs = logs.WithValues("namespace", resourceNamespace, "resourceName", resourceName, "resourceType", resourceType)
 
@@ -182,7 +173,7 @@ func SyncResource[T client.Object](ctx context.Context, r Reconciler, parentReso
 		if !changeResult.NeedsUpdate {
 			logs.Info(fmt.Sprintf("%s spec is the same. Skipping update.", resourceType))
 			r.GetRecorder().Eventf(oldResource, nil, corev1.EventTypeNormal, fmt.Sprintf("Update%s", resourceType), "Update", "Skipping update %s %s", resourceType, resourceNamespace)
-			res = oldResource
+			res, err = resourceInDesiredRepresentation(resource, oldResource)
 			return
 		}
 
@@ -191,6 +182,13 @@ func SyncResource[T client.Object](ctx context.Context, r Reconciler, parentReso
 			logs.Info(fmt.Sprintf("Manual changes detected on %s, will be overwritten", resourceType),
 				"currentGeneration", oldResource.GetGeneration(),
 				"lastAppliedGeneration", getAnnotation(oldResource, NvidiaAnnotationGenerationKey))
+		}
+
+		// Convert to the desired wire representation only after cache-backed observation and comparison.
+		updateResource, conversionErr := resourceInDesiredRepresentation(resource, oldResource)
+		if conversionErr != nil {
+			err = conversionErr
+			return
 		}
 
 		if changeResult.SpecNeedsUpdate {
@@ -203,30 +201,58 @@ func SyncResource[T client.Object](ctx context.Context, r Reconciler, parentReso
 			}
 
 			// Update the spec of the current object with the desired spec
-			err = CopySpec(resource, oldResource)
+			err = CopySpec(resource, updateResource)
 			if err != nil {
 				logs.Error(err, fmt.Sprintf("Failed to copy spec for %s.", resourceType))
-				r.GetRecorder().Eventf(oldResource, nil, corev1.EventTypeWarning, fmt.Sprintf("CopySpec%s", resourceType), "Update", "Failed to copy spec for %s %s: %s", resourceType, resourceNamespace, err)
+				r.GetRecorder().Eventf(updateResource, nil, corev1.EventTypeWarning, fmt.Sprintf("CopySpec%s", resourceType), "Update", "Failed to copy spec for %s %s: %s", resourceType, resourceNamespace, err)
 				return
 			}
 		} else {
 			logs.Info(fmt.Sprintf("%s spec is equivalent. Updating bookkeeping annotations only.", resourceType))
 		}
 
-		updateAnnotations(oldResource, *changeResult.NewHash, changeResult.NewGeneration)
+		updateAnnotations(updateResource, *changeResult.NewHash, changeResult.NewGeneration)
 
-		err = r.Update(ctx, oldResource)
+		err = r.Update(ctx, updateResource)
 		if err != nil {
 			logs.Error(err, fmt.Sprintf("Failed to update %s.", resourceType))
-			r.GetRecorder().Eventf(oldResource, nil, corev1.EventTypeWarning, fmt.Sprintf("Update%s", resourceType), "Update", "Failed to update %s %s: %s", resourceType, resourceNamespace, err)
+			r.GetRecorder().Eventf(updateResource, nil, corev1.EventTypeWarning, fmt.Sprintf("Update%s", resourceType), "Update", "Failed to update %s %s: %s", resourceType, resourceNamespace, err)
 			return
 		}
 		logs.Info(fmt.Sprintf("%s updated.", resourceType))
-		r.GetRecorder().Eventf(oldResource, nil, corev1.EventTypeNormal, fmt.Sprintf("Update%s", resourceType), "Update", "Updated %s %s", resourceType, resourceNamespace)
+		r.GetRecorder().Eventf(updateResource, nil, corev1.EventTypeNormal, fmt.Sprintf("Update%s", resourceType), "Update", "Updated %s %s", resourceType, resourceNamespace)
 		modified = true
-		res = oldResource
+		res = updateResource
 	}
 	return
+}
+
+// resourceInDesiredRepresentation converts observed into desired's wire type without mutating either input.
+func resourceInDesiredRepresentation[T client.Object](desired T, observed client.Object) (T, error) {
+	// Preserve the registered Go type for ordinary typed resources.
+	if _, isUnstructured := any(desired).(*unstructured.Unstructured); !isUnstructured {
+		result, ok := observed.(T)
+		if !ok {
+			var zero T
+			return zero, fmt.Errorf("observed resource %T does not match desired type %T", observed, desired)
+		}
+		return result, nil
+	}
+
+	// Serialize the cached typed object only when an opaque provider write requires it.
+	object, err := runtime.DefaultUnstructuredConverter.ToUnstructured(observed)
+	if err != nil {
+		var zero T
+		return zero, fmt.Errorf("convert observed resource to unstructured: %w", err)
+	}
+	result := &unstructured.Unstructured{Object: object}
+	result.GetObjectKind().SetGroupVersionKind(desired.GetObjectKind().GroupVersionKind())
+	typedResult, ok := any(result).(T)
+	if !ok {
+		var zero T
+		return zero, fmt.Errorf("unstructured resource does not match desired type %T", desired)
+	}
+	return typedResult, nil
 }
 
 // CopySpec copies only the Spec field from source to destination using Unstructured

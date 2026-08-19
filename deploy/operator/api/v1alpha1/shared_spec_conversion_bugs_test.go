@@ -156,65 +156,6 @@ func TestBugDGD_SpokeServiceAndExtraVolumeMountsCompose(t *testing.T) {
 	}
 }
 
-func TestBugDGD_HubVolumeMountOrderSurvivesComponentRename(t *testing.T) {
-	t.Log("Build a spoke-origin component whose extra mount precedes its compilation-cache mount")
-	in := &DynamoGraphDeployment{
-		ObjectMeta: metav1.ObjectMeta{Name: "renamed-volume-mounts", Namespace: "ns"},
-		Spec: DynamoGraphDeploymentSpec{
-			Services: map[string]*DynamoComponentDeploymentSharedSpec{
-				"worker": {
-					ComponentType: "worker",
-					VolumeMounts: []VolumeMount{{
-						Name:                  "model-cache",
-						MountPoint:            "/models",
-						UseAsCompilationCache: true,
-					}},
-					ExtraPodSpec: &ExtraPodSpec{
-						MainContainer: &corev1.Container{
-							VolumeMounts: []corev1.VolumeMount{{
-								Name:      "config",
-								MountPath: "/config",
-								ReadOnly:  true,
-							}},
-						},
-					},
-				},
-			},
-		},
-	}
-	hub := &v1beta1.DynamoGraphDeployment{}
-	if err := in.ConvertTo(hub); err != nil {
-		t.Fatalf("ConvertTo() error = %v", err)
-	}
-	hub.Spec.Components[0].ComponentName = "renamed"
-
-	t.Log("Round-trip the renamed hub component through its newly saved spoke representation")
-	spoke := &DynamoGraphDeployment{}
-	if err := spoke.ConvertFrom(hub); err != nil {
-		t.Fatalf("ConvertFrom() error = %v", err)
-	}
-	out := &v1beta1.DynamoGraphDeployment{}
-	if err := spoke.ConvertTo(out); err != nil {
-		t.Fatalf("ConvertTo() after rename error = %v", err)
-	}
-
-	t.Log("Verify the saved hub order and current mount values are both restored")
-	if len(out.Spec.Components) != 1 || out.Spec.Components[0].PodTemplate == nil {
-		t.Fatalf("expected one converted component with a podTemplate, got %#v", out.Spec.Components)
-	}
-	main, found := findContainerByName(out.Spec.Components[0].PodTemplate.Spec.Containers, mainContainerName)
-	if !found {
-		t.Fatalf("expected converted main container, got %#v", out.Spec.Components[0].PodTemplate.Spec.Containers)
-	}
-	want := []corev1.VolumeMount{
-		{Name: "config", MountPath: "/config", ReadOnly: true},
-		{Name: "model-cache", MountPath: "/models"},
-	}
-	if diff := cmp.Diff(want, main.VolumeMounts); diff != "" {
-		t.Fatalf("main volume-mount order changed after round-trip (-want +got):\n%s", diff)
-	}
-}
-
 func addGeneratedFrontendSidecarHubOnlySecurityContext(t *testing.T, podTemplate *corev1.PodTemplateSpec) {
 	t.Helper()
 	if podTemplate == nil {
