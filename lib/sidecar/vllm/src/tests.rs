@@ -781,6 +781,36 @@ fn token_native_compatibility_envelope_rejects_disabled_token_ids() {
 }
 
 #[test]
+fn terminal_routed_experts_are_mapped_to_structured_engine_data() {
+    let request = request();
+    let mut state = ResponseState::new(&request, DisaggregationMode::Aggregated);
+    let mut response = sequence_response(true, true, None);
+    response.outputs.as_mut().unwrap().routed_experts = Some(pb::RoutedExperts {
+        data: vec![1, 2, 3, 4],
+        shape: vec![2, 1, 2],
+        dtype: "uint8".to_string(),
+        start: 3,
+    });
+
+    let output = state
+        .convert(response)
+        .expect("valid routed experts")
+        .expect("terminal output");
+    assert_eq!(
+        output
+            .engine_data
+            .as_ref()
+            .and_then(|data| data.get("routed_experts")),
+        Some(&json!({
+            "data": "AQIDBA==",
+            "shape": [2, 1, 2],
+            "start": 3,
+            "dtype": "uint8"
+        }))
+    );
+}
+
+#[test]
 fn token_native_compatibility_envelope_rejects_conflicting_cache_salt() {
     let mut request = request();
     request.extra_args = Some(json!({
@@ -929,6 +959,42 @@ fn skip_special_tokens_false_is_forwarded_to_vllm() {
             .skip_special_tokens,
         Some(false)
     );
+}
+
+#[test]
+fn malformed_terminal_routed_experts_are_rejected() {
+    let request = request();
+    let mut state = ResponseState::new(&request, DisaggregationMode::Aggregated);
+    let mut response = sequence_response(true, true, None);
+    response.outputs.as_mut().unwrap().routed_experts = Some(pb::RoutedExperts {
+        data: vec![1],
+        shape: vec![2, 1, 2],
+        dtype: "uint8".to_string(),
+        start: 0,
+    });
+
+    let error = state
+        .convert(response)
+        .expect_err("byte-length mismatch must fail");
+    assert!(error.to_string().contains("byte length mismatch"));
+}
+
+#[test]
+fn nonterminal_routed_experts_are_rejected() {
+    let request = request();
+    let mut state = ResponseState::new(&request, DisaggregationMode::Aggregated);
+    let mut response = sequence_response(false, true, None);
+    response.outputs.as_mut().unwrap().routed_experts = Some(pb::RoutedExperts {
+        data: vec![1],
+        shape: vec![1, 1, 1],
+        dtype: "uint8".to_string(),
+        start: 0,
+    });
+
+    let error = state
+        .convert(response)
+        .expect_err("nonterminal routed experts must fail");
+    assert!(error.to_string().contains("only valid on a terminal"));
 }
 
 struct FakeServer {
