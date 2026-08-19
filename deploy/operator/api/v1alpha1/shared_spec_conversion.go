@@ -833,7 +833,7 @@ func ConvertFromProviderOverride(src *ProviderOverride, dst *v1beta1.ProviderOve
 	*dst = v1beta1.ProviderOverride{
 		APIVersion: src.APIVersion,
 		Target:     src.Target,
-		Value:      *src.Value.DeepCopy(),
+		Value:      src.Value,
 	}
 }
 
@@ -843,7 +843,7 @@ func ConvertToProviderOverride(src *v1beta1.ProviderOverride, dst *ProviderOverr
 	*dst = ProviderOverride{
 		APIVersion: src.APIVersion,
 		Target:     src.Target,
-		Value:      *src.Value.DeepCopy(),
+		Value:      src.Value,
 	}
 }
 

@@ -28,7 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-func TestApplyGroveOverrides(t *testing.T) {
+func TestComposeGroveOverrides(t *testing.T) {
 	t.Log("Build a DGD with overrides at every supported Grove provider context")
 	dgd := &nvidiacomv1beta1.DynamoGraphDeployment{
 		Spec: nvidiacomv1beta1.DynamoGraphDeploymentSpec{
@@ -83,21 +83,16 @@ func TestApplyGroveOverrides(t *testing.T) {
 		},
 	}
 
-	t.Log("Apply all provider-native fragments to the rendered object")
-	got, err := ApplyGroveOverrides(dgd, desired)
+	t.Log("Compose all provider-native fragments into the rendered object")
+	got, err := ComposeGroveOverrides(dgd, desired)
 	if err != nil {
-		t.Fatalf("ApplyGroveOverrides() error = %v", err)
+		t.Fatalf("ComposeGroveOverrides() error = %v", err)
 	}
 	if got.GetAPIVersion() != GroveAPIVersion || got.GetKind() != TargetPodCliqueSet {
 		t.Fatalf("GVK = %s %s, want %s %s", got.GetAPIVersion(), got.GetKind(), GroveAPIVersion, TargetPodCliqueSet)
 	}
-
-	t.Log("Verify server-owned fields were excluded from the apply payload")
-	if _, found, err := unstructured.NestedFieldNoCopy(got.Object, "status"); err != nil || found {
-		t.Fatalf("status = (found=%t, err=%v), want absent", found, err)
-	}
-	if _, found, err := unstructured.NestedFieldNoCopy(got.Object, "metadata", "creationTimestamp"); err != nil || found {
-		t.Fatalf("metadata.creationTimestamp = (found=%t, err=%v), want absent", found, err)
+	if desired.Spec.Template.TopologyConstraint != nil {
+		t.Fatal("ComposeGroveOverrides() mutated the rendered input")
 	}
 
 	t.Log("Verify each fragment reached only its resolved destination")
@@ -110,7 +105,7 @@ func TestApplyGroveOverrides(t *testing.T) {
 	assertNestedValue(t, got.Object, int64(1), "spec", "replicas")
 }
 
-func TestApplyGroveOverridesRejectsMissingDestination(t *testing.T) {
+func TestComposeGroveOverridesRejectsMissingDestination(t *testing.T) {
 	t.Log("Build an override whose generated component destination is absent")
 	dgd := &nvidiacomv1beta1.DynamoGraphDeployment{
 		Spec: nvidiacomv1beta1.DynamoGraphDeploymentSpec{
@@ -137,16 +132,16 @@ func TestApplyGroveOverridesRejectsMissingDestination(t *testing.T) {
 	}
 
 	t.Log("Reject the override with the missing generated destination in the error")
-	_, err := ApplyGroveOverrides(dgd, desired)
+	_, err := ComposeGroveOverrides(dgd, desired)
 	if err == nil {
-		t.Fatal("ApplyGroveOverrides() error = nil, want missing generated destination error")
+		t.Fatal("ComposeGroveOverrides() error = nil, want missing generated destination error")
 	}
 	if !strings.Contains(err.Error(), `generated destination spec.template.cliques["missing"] was not found`) {
-		t.Fatalf("ApplyGroveOverrides() error = %v, want missing generated destination error", err)
+		t.Fatalf("ComposeGroveOverrides() error = %v, want missing generated destination error", err)
 	}
 }
 
-func TestApplyGroveOverridesRejectsUnsupportedTarget(t *testing.T) {
+func TestComposeGroveOverridesRejectsUnsupportedTarget(t *testing.T) {
 	t.Log("Build a root override with a target no longer registered by this release")
 	dgd := &nvidiacomv1beta1.DynamoGraphDeployment{
 		Spec: nvidiacomv1beta1.DynamoGraphDeploymentSpec{
@@ -155,9 +150,9 @@ func TestApplyGroveOverridesRejectsUnsupportedTarget(t *testing.T) {
 	}
 
 	t.Log("Reject the stale target before applying the provider value")
-	_, err := ApplyGroveOverrides(dgd, &grovev1alpha1.PodCliqueSet{})
+	_, err := ComposeGroveOverrides(dgd, &grovev1alpha1.PodCliqueSet{})
 	if err == nil || !strings.Contains(err.Error(), "unsupported Grove target") {
-		t.Fatalf("ApplyGroveOverrides() error = %v, want unsupported Grove target", err)
+		t.Fatalf("ComposeGroveOverrides() error = %v, want unsupported Grove target", err)
 	}
 }
 

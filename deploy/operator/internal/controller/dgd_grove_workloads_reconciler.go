@@ -28,8 +28,8 @@ import (
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/dynamo"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/provideroverride"
 	grovev1alpha1 "github.com/ai-dynamo/grove/operator/api/core/v1alpha1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/scale"
 	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -88,7 +88,14 @@ func (r *groveWorkloadsReconciler) Reconcile(
 	}
 	renderDeployment := groveRenderDeployment(dgd, desiredPodCliqueSet)
 
-	syncedPodCliqueSet, err := r.reconcileRenderedPodCliqueSet(ctx, dgd, desiredPodCliqueSet)
+	// Compose raw provider fields into the complete desired PCS before reconciliation.
+	desiredProviderObject, err := provideroverride.ComposeGroveOverrides(dgd, desiredPodCliqueSet)
+	if err != nil {
+		return ReconcileResult{}, fmt.Errorf("failed to compose Grove provider overrides: %w", err)
+	}
+
+	// Reconcile every PCS through the same resource pathway, with or without overrides.
+	syncedPodCliqueSet, err := r.reconcilePodCliqueSet(ctx, dgd, desiredProviderObject)
 	if err != nil {
 		logger.Error(err, "failed to reconcile the Grove PodCliqueSet")
 		return ReconcileResult{}, fmt.Errorf("failed to reconcile the Grove PodCliqueSet: %w", err)
@@ -117,68 +124,29 @@ func (r *groveWorkloadsReconciler) Reconcile(
 	return checkGroveResourcesReadiness(resources, readiness.Classification), nil
 }
 
-// reconcileRenderedPodCliqueSet selects the durable Grove reconciliation
-// pathway and converges the rendered PodCliqueSet. dgd and desired must not be
-// nil.
-func (r *groveWorkloadsReconciler) reconcileRenderedPodCliqueSet(
-	ctx context.Context,
-	dgd *nvidiacomv1beta1.DynamoGraphDeployment,
-	desired *grovev1alpha1.PodCliqueSet,
-) (*grovev1alpha1.PodCliqueSet, error) {
-	// Keep SSA sticky after the first override so removing its last fragment prunes provider-owned fields.
-	useProviderOverrideSSA := provideroverride.HasGroveOverrides(dgd)
-	if !useProviderOverrideSSA {
-		live := &grovev1alpha1.PodCliqueSet{}
-		key := types.NamespacedName{Name: desired.Name, Namespace: desired.Namespace}
-		if getErr := r.syncer.Get(ctx, key, live); getErr == nil {
-			useProviderOverrideSSA = managedByGroveProviderOverrideSSA(live)
-		} else if !apierrors.IsNotFound(getErr) {
-			return nil, fmt.Errorf("get Grove PodCliqueSet reconciliation pathway %s: %w", key, getErr)
-		}
-	}
-
-	// Keep the existing typed path for workloads that have never used provider overrides.
-	if !useProviderOverrideSSA {
-		return r.reconcilePodCliqueSet(ctx, dgd, desired)
-	}
-
-	// Apply sparse provider overrides before reconciling through the sticky SSA pathway.
-	providerObject, err := provideroverride.ApplyGroveOverrides(dgd, desired)
-	if err != nil {
-		return nil, r.rejectGroveProviderProgram(ctx, desired, err)
-	}
-	return r.reconcileGroveProviderProgram(ctx, dgd, providerObject)
-}
-
-// managedByGroveProviderOverrideSSA reports whether this native workload has entered the sticky SSA pathway.
-// podCliqueSet must not be nil.
-func managedByGroveProviderOverrideSSA(podCliqueSet *grovev1alpha1.PodCliqueSet) bool {
-	// Treat the durable field-manager entry as the pathway marker across override removal.
-	for _, entry := range podCliqueSet.ManagedFields {
-		if entry.Manager == provideroverride.GroveFieldOwner {
-			return true
-		}
-	}
-	return false
-}
-
 func (r *groveWorkloadsReconciler) reconcilePodCliqueSet(
 	ctx context.Context,
 	dgd *nvidiacomv1beta1.DynamoGraphDeployment,
-	desired *grovev1alpha1.PodCliqueSet,
+	desired *unstructured.Unstructured,
 ) (*grovev1alpha1.PodCliqueSet, error) {
 	_, synced, err := commoncontroller.SyncResource(
 		ctx,
 		&r.syncer,
 		dgd,
-		func(context.Context) (*grovev1alpha1.PodCliqueSet, bool, error) {
+		func(context.Context) (*unstructured.Unstructured, bool, error) {
 			return desired, false, nil
 		},
 	)
 	if err != nil {
 		return nil, err
 	}
-	return synced, nil
+
+	// Adapt the synchronized wire object to the typed Grove readiness view.
+	podCliqueSet := &grovev1alpha1.PodCliqueSet{}
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(synced.Object, podCliqueSet); err != nil {
+		return nil, fmt.Errorf("convert synchronized Grove PodCliqueSet: %w", err)
+	}
+	return podCliqueSet, nil
 }
 
 // observePodCliqueSetReadiness takes the authoritative Grove snapshot after

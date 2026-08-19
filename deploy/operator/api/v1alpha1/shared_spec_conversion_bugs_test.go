@@ -23,35 +23,12 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	corev1 "k8s.io/api/core/v1"
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
 	v1beta1 "github.com/ai-dynamo/dynamo/deploy/operator/api/v1beta1"
 )
-
-func TestProviderOverrideConversionDeepCopiesRawJSON(t *testing.T) {
-	const rawValue = `{"topologyConstraint":{"pack":{"required":"rack"}}}`
-
-	t.Log("Convert an alpha override without aliasing its raw provider value")
-	alpha := &ProviderOverride{Value: apiextensionsv1.JSON{Raw: []byte(rawValue)}}
-	var beta v1beta1.ProviderOverride
-	ConvertFromProviderOverride(alpha, &beta)
-	beta.Value.Raw[0] = '['
-	if string(alpha.Value.Raw) != rawValue {
-		t.Fatalf("ConvertFromProviderOverride() aliased source raw JSON: %q", alpha.Value.Raw)
-	}
-
-	t.Log("Convert a beta override without aliasing its raw provider value")
-	beta = v1beta1.ProviderOverride{Value: apiextensionsv1.JSON{Raw: []byte(rawValue)}}
-	alpha = &ProviderOverride{}
-	ConvertToProviderOverride(&beta, alpha)
-	alpha.Value.Raw[0] = '['
-	if string(beta.Value.Raw) != rawValue {
-		t.Fatalf("ConvertToProviderOverride() aliased source raw JSON: %q", beta.Value.Raw)
-	}
-}
 
 func TestConvertToServiceCheckpointConfigSetsNilIdentity(t *testing.T) {
 	var got ServiceCheckpointConfig

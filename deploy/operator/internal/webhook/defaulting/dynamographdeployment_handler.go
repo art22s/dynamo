@@ -83,9 +83,7 @@ func (d *DGDDefaulter) Default(ctx context.Context, obj runtime.Object) error {
 	// Resolve the authoritative or creation-time provider before applying component defaults.
 	provider, providerSelected := defaultWorkloadProvider(ctx, dgd, req.Operation)
 
-	// Persist the lowering target at every explicit provider context. If the
-	// provider is not selected or the schema version is unsupported, leave the
-	// target empty so validation can report the precise field error.
+	// Persist the root target only when this provider context resolves unambiguously.
 	provideroverride.DefaultTarget(dgd.Spec.ProviderOverride, provider, provideroverride.ScopeRoot, nil)
 
 	// Default nil replicas on every operation so newly added components remain safe to expand.
@@ -102,9 +100,7 @@ func (d *DGDDefaulter) Default(ctx context.Context, obj runtime.Object) error {
 			component.MinAvailable = ptr.To(int32(1))
 		}
 
-		// Persist the lowering target at every explicit provider context. If a
-		// context or schema version is unsupported, leave target empty so the
-		// validating webhook can report the precise field error.
+		// Persist the component target only when this provider context resolves unambiguously.
 		provideroverride.DefaultTarget(
 			component.ProviderOverride,
 			provider,
@@ -122,6 +118,7 @@ func (d *DGDDefaulter) Default(ctx context.Context, obj runtime.Object) error {
 					component,
 				)
 			}
+
 			if component.Multinode.Worker != nil {
 				provideroverride.DefaultTarget(
 					component.Multinode.Worker.ProviderOverride,

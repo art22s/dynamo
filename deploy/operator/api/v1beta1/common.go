@@ -69,12 +69,18 @@ type CompilationCacheConfig struct {
 	MountPath string `json:"mountPath,omitempty"`
 }
 
-// ProviderOverride carries a sparse, provider-native configuration fragment for
-// the provider context in which it appears. Dynamo resolves Target from the
-// graph-level workload provider and the DGD location, then persists it so the
-// fragment is not reinterpreted after an operator upgrade.
+// ProviderOverride carries a sparse provider-native fragment for its DGD context.
+// Grove support is restricted as follows:
+//   - apiVersion must be `grove.io/v1alpha1`.
+//   - target is `PodCliqueSet`, `PodCliqueTemplateSpec`, or
+//     `PodCliqueScalingGroupConfig`, according to the field location and
+//     component shape.
+//   - value may set only the target's topologyConstraint subtree.
+//
+// All other providers, versions, targets, and fields are rejected.
 type ProviderOverride struct {
-	// apiVersion selects the provider schema used to validate value.
+	// apiVersion is the Kubernetes API group and version of the provider schema.
+	// Grove requires `grove.io/v1alpha1`.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	APIVersion string `json:"apiVersion"`
@@ -85,8 +91,10 @@ type ProviderOverride struct {
 	// +optional
 	Target string `json:"target,omitempty"`
 
-	// value is a sparse fragment of the selected provider schema. Admission
-	// restricts it to fields owned by the provider adapter for this context.
+	// value is a sparse fragment of the selected provider schema. For Grove,
+	// PodCliqueSet accepts only `spec.template.topologyConstraint`; embedded
+	// PodCliqueTemplateSpec and PodCliqueScalingGroupConfig targets accept only
+	// `topologyConstraint`.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:pruning:PreserveUnknownFields
 	// +kubebuilder:validation:Type=object
@@ -97,8 +105,10 @@ type ProviderOverride struct {
 // Additional role-specific settings can be added here without introducing a
 // polymorphic list keyed by generated provider resource names.
 type MultinodeRoleSpec struct {
-	// providerOverride configures the provider-native unit generated for this
-	// multinode role. It is supported only for components embedded in a DGD.
+	// providerOverride configures the Grove PCLQ template generated for this
+	// multinode role. It uses apiVersion `grove.io/v1alpha1`, target
+	// `PodCliqueTemplateSpec`, and may set only `topologyConstraint`. It is
+	// supported only for components embedded in a DGD.
 	// +optional
 	ProviderOverride *ProviderOverride `json:"providerOverride,omitempty"`
 }

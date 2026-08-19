@@ -158,8 +158,7 @@ func ValidateValue(target string, raw []byte) []ValueError {
 
 // validateKnownGroveShape checks fields understood by this Dynamo release
 // against the exact Grove resource or embedded Go type. encoding/json ignores
-// unknown fields, so forward-compatible descendants remain available for the
-// provider dry-run to validate against the installed CRD and webhooks.
+// unknown fields so forward-compatible descendants remain opaque.
 func validateKnownGroveShape(target string, raw []byte) *ValueError {
 	// Select the exact standalone or embedded type registered for this target.
 	var destination any

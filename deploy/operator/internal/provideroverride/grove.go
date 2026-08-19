@@ -18,7 +18,6 @@
 package provideroverride
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -27,63 +26,48 @@ import (
 	grovev1alpha1 "github.com/ai-dynamo/grove/operator/api/core/v1alpha1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	sigsjson "sigs.k8s.io/json"
 )
 
-// GroveFieldOwner is the server-side apply manager for Grove provider programs.
-const GroveFieldOwner = "dynamo-operator-grove-provider-override"
-
-// DryRunGroveProgram asks the API server to validate a complete rendered Grove
-// provider program without persisting it. kubeClient and desired must not be nil.
-func DryRunGroveProgram(
-	ctx context.Context,
-	kubeClient client.Client,
-	desired *unstructured.Unstructured,
-) error {
-	// Exercise the installed CRD and admission chain; controller-runtime Apply is strictly field-validated.
-	return kubeClient.Apply(
-		ctx,
-		client.ApplyConfigurationFromUnstructured(desired.DeepCopy()),
-		client.FieldOwner(GroveFieldOwner),
-		client.ForceOwnership,
-		client.DryRunAll,
-	)
-}
-
-// HasGroveOverrides reports whether a DGD contains a provider-native fragment
-// at any Grove provider context. dgd must not be nil.
-func HasGroveOverrides(dgd *nvidiacomv1beta1.DynamoGraphDeployment) bool {
+// HasGroveTopologyOverrides reports whether any DGD provider context writes a
+// Grove topology constraint. dgd must not be nil.
+func HasGroveTopologyOverrides(dgd *nvidiacomv1beta1.DynamoGraphDeployment) bool {
 	// Check the root before traversing component and role contexts.
-	if dgd.Spec.ProviderOverride != nil {
+	if overrideWritesGroveTopology(dgd.Spec.ProviderOverride) {
 		return true
 	}
 
-	// Stop as soon as any component-level provider context is populated.
+	// Stop as soon as one component provider context writes topology.
 	for i := range dgd.Spec.Components {
 		component := &dgd.Spec.Components[i]
-		if component.ProviderOverride != nil {
+		if overrideWritesGroveTopology(component.ProviderOverride) {
 			return true
 		}
 		if component.Multinode == nil {
 			continue
 		}
-		if component.Multinode.Leader != nil && component.Multinode.Leader.ProviderOverride != nil {
+		if component.Multinode.Leader != nil &&
+			overrideWritesGroveTopology(component.Multinode.Leader.ProviderOverride) {
 			return true
 		}
-		if component.Multinode.Worker != nil && component.Multinode.Worker.ProviderOverride != nil {
+		if component.Multinode.Worker != nil &&
+			overrideWritesGroveTopology(component.Multinode.Worker.ProviderOverride) {
 			return true
 		}
 	}
 	return false
 }
 
-// ApplyGroveOverrides converts a fully rendered PodCliqueSet to unstructured
+func overrideWritesGroveTopology(override *nvidiacomv1beta1.ProviderOverride) bool {
+	return override != nil && WritesGroveTopology(override.Target, override.Value.Raw)
+}
+
+// ComposeGroveOverrides converts a fully rendered PodCliqueSet to unstructured
 // form and inserts each provider-owned subtree at its resolved destination.
 // Keeping the result unstructured preserves provider fields that are newer
 // than the Grove Go types compiled into Dynamo. dgd and desired must not be
 // nil.
-func ApplyGroveOverrides(
+func ComposeGroveOverrides(
 	dgd *nvidiacomv1beta1.DynamoGraphDeployment,
 	desired *grovev1alpha1.PodCliqueSet,
 ) (*unstructured.Unstructured, error) {
@@ -95,10 +79,6 @@ func ApplyGroveOverrides(
 	result := &unstructured.Unstructured{Object: object}
 	result.SetAPIVersion(GroveAPIVersion)
 	result.SetKind(TargetPodCliqueSet)
-
-	// Remove server-owned fields that do not belong in an apply configuration.
-	unstructured.RemoveNestedField(result.Object, "status")
-	unstructured.RemoveNestedField(result.Object, "metadata", "creationTimestamp")
 
 	// Apply the root fragment before the more specific component destinations.
 	if err := applyGroveRootOverride(result, dgd.Spec.ProviderOverride); err != nil {
@@ -288,7 +268,7 @@ func setNamedGroveTopologyConstraint(
 		if !ok || item["name"] != name {
 			continue
 		}
-		item["topologyConstraint"] = runtime.DeepCopyJSONValue(topologyConstraint)
+		item["topologyConstraint"] = topologyConstraint
 		items[i] = item
 		return unstructured.SetNestedSlice(result.Object, items, path...)
 	}
@@ -316,5 +296,5 @@ func groveTopologyConstraint(override *nvidiacomv1beta1.ProviderOverride) (inter
 	if !found {
 		return nil, fmt.Errorf("value.%s is required", strings.Join(path, "."))
 	}
-	return runtime.DeepCopyJSONValue(topologyConstraint), nil
+	return topologyConstraint, nil
 }

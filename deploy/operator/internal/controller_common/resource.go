@@ -70,7 +70,6 @@ func SyncResource[T client.Object](ctx context.Context, r Reconciler, parentReso
 	resourceNamespace := resource.GetNamespace()
 	resourceName := resource.GetName()
 	resourceType := reflect.TypeOf(resource).Elem().Name()
-	logs = logs.WithValues("namespace", resourceNamespace, "resourceName", resourceName, "resourceType", resourceType)
 
 	// Retrieve the GroupVersionKind (GVK) of the desired object
 	gvk, err := apiutil.GVKForObject(resource, r.Scheme())
@@ -79,18 +78,31 @@ func SyncResource[T client.Object](ctx context.Context, r Reconciler, parentReso
 		return
 	}
 
-	// Create a new instance of the object
-	obj, err := r.Scheme().New(gvk)
-	if err != nil {
-		logs.Error(err, "Failed to create a new object for GVK")
-		return
+	// Allocate the live object in the same representation as the desired resource.
+	var oldResource T
+	if _, isUnstructured := any(resource).(*unstructured.Unstructured); isUnstructured {
+		resourceType = gvk.Kind
+		var ok bool
+		oldResource, ok = any(&unstructured.Unstructured{}).(T)
+		if !ok {
+			err = fmt.Errorf("unstructured resource does not implement the requested object type")
+			return
+		}
+		oldResource.GetObjectKind().SetGroupVersionKind(gvk)
+	} else {
+		obj, newErr := r.Scheme().New(gvk)
+		if newErr != nil {
+			err = newErr
+			logs.Error(err, "Failed to create a new object for GVK")
+			return
+		}
+		var ok bool
+		oldResource, ok = obj.(T)
+		if !ok {
+			return
+		}
 	}
-
-	// Type assertion to ensure the object implements client.Object
-	oldResource, ok := obj.(T)
-	if !ok {
-		return
-	}
+	logs = logs.WithValues("namespace", resourceNamespace, "resourceName", resourceName, "resourceType", resourceType)
 
 	err = r.Get(ctx, types.NamespacedName{Name: resourceName, Namespace: resourceNamespace}, oldResource)
 	oldResourceIsNotFound := errors.IsNotFound(err)
@@ -273,6 +285,10 @@ func CopySpec(source, destination client.Object) error {
 	destUnstructured := &unstructured.Unstructured{Object: destMap}
 
 	if spec, found, err := unstructured.NestedFieldCopy(sourceUnstructured.Object, "spec"); err == nil && found {
+		// Keep unstructured destinations unstructured so provider fields unknown to compiled Go types survive.
+		if destinationUnstructured, ok := destination.(*unstructured.Unstructured); ok {
+			return unstructured.SetNestedField(destinationUnstructured.Object, spec, "spec")
+		}
 		if err := unstructured.SetNestedField(destUnstructured.Object, spec, "spec"); err != nil {
 			return err
 		}

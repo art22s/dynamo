@@ -532,7 +532,7 @@ func main() {
 	}
 
 	if err := registerWebhookHandlers(
-		mgr, operatorCfg, runtimeConfig, dockerSecretRetriever, operatorVersion, dgdrDefaultImage, gates,
+		mgr, operatorCfg, runtimeConfig, operatorVersion, dgdrDefaultImage, gates,
 	); err != nil {
 		setupLog.Error(err, "failed to register webhooks")
 		os.Exit(1)
@@ -697,7 +697,6 @@ func registerWebhookHandlers(
 	mgr ctrl.Manager,
 	operatorCfg *configv1alpha1.OperatorConfiguration,
 	runtimeConfig *commonController.RuntimeConfig,
-	dockerSecretRetriever *secrets.DockerSecretIndexer,
 	operatorVersion string,
 	dgdrDefaultImage string,
 	gate features.Gate,
@@ -716,7 +715,6 @@ func registerWebhookHandlers(
 		OperatorVersion:   operatorVersion,
 		DGDRDefaultImage:  dgdrDefaultImage,
 		OperatorPrincipal: operatorPrincipal,
-		SecretsRetriever:  dockerSecretRetriever,
 		Gate:              gate,
 	}); err != nil {
 		return err

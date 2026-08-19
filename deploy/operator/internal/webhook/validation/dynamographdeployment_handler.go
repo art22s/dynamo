@@ -20,11 +20,8 @@ package validation
 import (
 	"context"
 
-	configv1alpha1 "github.com/ai-dynamo/dynamo/deploy/operator/api/config/v1alpha1"
 	nvidiacomv1beta1 "github.com/ai-dynamo/dynamo/deploy/operator/api/v1beta1"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/consts"
-	commoncontroller "github.com/ai-dynamo/dynamo/deploy/operator/internal/controller_common"
-	"github.com/ai-dynamo/dynamo/deploy/operator/internal/dynamo"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/features"
 	internalwebhook "github.com/ai-dynamo/dynamo/deploy/operator/internal/webhook"
 	authenticationv1 "k8s.io/api/authentication/v1"
@@ -44,34 +41,18 @@ const (
 type DynamoGraphDeploymentHandler struct {
 	mgr               manager.Manager
 	operatorPrincipal string
-	providerProgram   *groveProviderProgramValidator
-}
-
-// DynamoGraphDeploymentHandlerOptions configures validation that depends on
-// the running operator and installed provider APIs.
-type DynamoGraphDeploymentHandlerOptions struct {
-	OperatorPrincipal string
-	Config            *configv1alpha1.OperatorConfiguration
-	RuntimeConfig     *commoncontroller.RuntimeConfig
-	SecretsRetriever  dynamo.SecretsRetriever
 }
 
 // NewDynamoGraphDeploymentHandler creates a new handler for DynamoGraphDeployment Webhook.
-// mgr, opts.Config, and opts.RuntimeConfig must not be nil. OperatorPrincipal is
-// the full Kubernetes SA username used to authorize operator-owned updates.
+// mgr must not be nil. operatorPrincipal is the full Kubernetes SA username
+// used to authorize operator-owned updates.
 func NewDynamoGraphDeploymentHandler(
 	mgr manager.Manager,
-	opts DynamoGraphDeploymentHandlerOptions,
+	operatorPrincipal string,
 ) *DynamoGraphDeploymentHandler {
 	return &DynamoGraphDeploymentHandler{
 		mgr:               mgr,
-		operatorPrincipal: opts.OperatorPrincipal,
-		providerProgram: &groveProviderProgramValidator{
-			client:           mgr.GetClient(),
-			config:           opts.Config,
-			runtimeConfig:    opts.RuntimeConfig,
-			secretsRetriever: opts.SecretsRetriever,
-		},
+		operatorPrincipal: operatorPrincipal,
 	}
 }
 
@@ -95,7 +76,7 @@ func (h *DynamoGraphDeploymentHandler) ValidateCreate(ctx context.Context, obj *
 	if err != nil {
 		return warnings, err
 	}
-	return warnings, h.providerProgram.ValidateCreate(ctx, obj)
+	return warnings, nil
 }
 
 // ValidateUpdate validates a DynamoGraphDeployment update request.
@@ -152,10 +133,6 @@ func (h *DynamoGraphDeploymentHandler) ValidateUpdate(
 		logger.Info("validation failed", "error", err.Error(), "user", username)
 		return updateWarnings, err
 	}
-	if err := h.providerProgram.ValidateUpdate(ctx, oldObj, newObj); err != nil {
-		return append(warnings, updateWarnings...), err
-	}
-
 	// Combine warnings
 	warnings = append(warnings, updateWarnings...)
 	return warnings, nil
